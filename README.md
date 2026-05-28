@@ -1,4 +1,4 @@
-# PoC: OpenShell + Claude Code Agent + MCP
+# OpenShell + Claude Code Agent + MCP
 
 ## Overview
 
