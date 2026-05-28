@@ -181,7 +181,7 @@ openshell sandbox create \
 > openshell sandbox exec --name wallet-agent -- claude \
 >   --mcp-config /sandbox/.mcp.json \
 >   --dangerously-skip-permissions \
->   --system-prompt "你是一個加密錢包簽名助手。當使用者提出交易請求時，使用 request_signature 工具提交以待審核。請預設以繁體中文回應，除非使用者指定其他語言。" \
+>   --system-prompt "You are a crypto wallet signing assistant. When the user submits a transaction request, use the request_signature tool to submit it for review. Please respond in Traditional Chinese by default, unless the user specifies another language." \
 >   --output-format stream-json \
 >   --verbose
 >
