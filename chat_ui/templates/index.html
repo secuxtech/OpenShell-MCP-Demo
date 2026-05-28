@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <title>Crypto Wallet Agent</title>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: sans-serif; background: #0f172a; color: #e2e8f0;
+           display: flex; flex-direction: column; height: 100vh; }
+
+    header { background: #1e293b; padding: 14px 20px; font-size: 18px;
+             font-weight: 700; color: #38bdf8; border-bottom: 1px solid #334155;
+             display: flex; align-items: center; gap: 10px; }
+    header span.sub { font-size: 13px; font-weight: 400; color: #64748b; }
+
+    .layout { display: flex; flex: 1; overflow: hidden; }
+
+    /* ---- Chat panel ---- */
+    .chat-panel { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+    #messages { flex: 1; overflow-y: auto; padding: 20px;
+                display: flex; flex-direction: column; gap: 10px; }
+    .msg { padding: 10px 14px; border-radius: 10px; max-width: 85%; line-height: 1.6; }
+    .user  { background: #0ea5e9; color: #fff; align-self: flex-end; white-space: pre-wrap; }
+    .agent { background: #1e293b; color: #e2e8f0; align-self: flex-start; }
+    .agent p { margin: 0 0 8px; }
+    .agent p:last-child { margin-bottom: 0; }
+    .agent strong { color: #38bdf8; }
+    .agent code { background: #0f172a; padding: 2px 6px; border-radius: 4px;
+                  font-family: monospace; font-size: 13px; color: #a5f3fc; }
+    .agent pre { background: #0f172a; padding: 10px; border-radius: 6px;
+                 overflow-x: auto; margin: 6px 0; }
+    .agent pre code { padding: 0; background: none; }
+    .agent ul, .agent ol { padding-left: 20px; margin: 4px 0; }
+    .agent blockquote { border-left: 3px solid #334155; padding-left: 10px;
+                        color: #94a3b8; margin: 6px 0; }
+    .spinner { width: 18px; height: 18px; border: 2px solid #334155;
+               border-top-color: #38bdf8; border-radius: 50%;
+               animation: spin 0.7s linear infinite; margin: 4px 0; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .input-row { display: flex; gap: 8px; padding: 14px;
+                 background: #1e293b; border-top: 1px solid #334155; }
+    #input { flex: 1; padding: 10px 14px; border-radius: 8px; font-size: 15px;
+             background: #0f172a; border: 1px solid #334155; color: #e2e8f0; outline: none; }
+    #input:focus { border-color: #0ea5e9; }
+    #send { padding: 10px 20px; background: #0ea5e9; color: #fff;
+            border: none; border-radius: 8px; cursor: pointer; font-weight: 600; }
+    #send:disabled { background: #334155; cursor: default; }
+
+    /* ---- Approval panel ---- */
+    .approval-panel { width: 320px; min-width: 320px; background: #0f172a;
+                      border-left: 1px solid #334155; display: flex; flex-direction: column; }
+    .approval-panel h3 { padding: 14px 16px; font-size: 13px; font-weight: 700;
+                         color: #f59e0b; border-bottom: 1px solid #334155;
+                         text-transform: uppercase; letter-spacing: .05em; }
+    #approval-body { flex: 1; display: flex; align-items: center;
+                     justify-content: center; padding: 20px; }
+    .empty-approval { color: #475569; font-size: 13px; text-align: center; line-height: 1.8; }
+    .req-card { background: #1e293b; border-radius: 10px; padding: 18px;
+                width: 100%; display: flex; flex-direction: column; gap: 12px; }
+    .req-card .label { font-size: 11px; color: #64748b; text-transform: uppercase;
+                       letter-spacing: .06em; margin-bottom: 2px; }
+    .req-card .value { font-size: 13px; color: #cbd5e1; word-break: break-all; }
+    .req-card .req-id { font-family: monospace; color: #38bdf8; }
+    .btn-row { display: flex; gap: 10px; margin-top: 4px; }
+    .btn { flex: 1; padding: 11px; border: none; border-radius: 8px;
+           font-size: 15px; font-weight: 700; cursor: pointer; transition: opacity .15s; }
+    .btn:hover { opacity: .85; }
+    .btn:disabled { opacity: .4; cursor: default; }
+    .approve { background: #10b981; color: #fff; }
+    .reject  { background: #ef4444; color: #fff; }
+    #approval-status { padding: 10px 16px; font-size: 12px; text-align: center;
+                       color: #94a3b8; min-height: 34px; border-top: 1px solid #1e293b; }
+  </style>
+</head>
+<body>
+<header>
+  Crypto Wallet Agent
+  <span class="sub">Human-in-the-Loop PoC · OpenShell Sandbox</span>
+</header>
+
+<div class="layout">
+  <!-- Chat -->
+  <div class="chat-panel">
+    <div id="messages">
+      <div class="msg agent">你好！請告訴我你想要協助的任務內容。</div>
+    </div>
+    <div class="input-row">
+      <input id="input" type="text" placeholder="e.g. Transfer 0.5 ETH to 0xABC123..." />
+      <button id="send" onclick="sendMessage()">Send</button>
+    </div>
+  </div>
+
+  <!-- Approval -->
+  <div class="approval-panel">
+    <h3>Signing Approval</h3>
+    <div id="approval-body">
+      <div class="empty-approval">Waiting for<br>signing requests...</div>
+    </div>
+    <div id="approval-status"></div>
+  </div>
+</div>
+
+<script>
+  // ---- Chat ----
+
+  // Submit message on Enter key
+  document.getElementById('input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') sendMessage();
+  });
+
+  // Append a message bubble to the chat panel; returns the element for later updates
+  function appendChatBubble(cls, text) {
+    const el = document.createElement('div');
+    el.className = `msg ${cls}`;
+    if (cls === 'agent') {
+      el.innerHTML = marked.parse(text);
+    } else {
+      el.textContent = text;
+    }
+    const box = document.getElementById('messages');
+    box.appendChild(el);
+    box.scrollTop = box.scrollHeight;
+    return el;
+  }
+
+  // Update an existing agent bubble; renders markdown unless it's the loading placeholder
+  function updateAgentBubble(el, text) {
+    if (text === '...') {
+      el.innerHTML = '<div class="spinner"></div>';
+    } else {
+      el.innerHTML = marked.parse(text);
+    }
+    document.getElementById('messages').scrollTop = 9999;
+  }
+
+  // Send user message to /chat and stream the SSE response into the chat panel
+  async function sendMessage() {
+    const input = document.getElementById('input');
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+    document.getElementById('send').disabled = true;
+    appendChatBubble('user', text);
+    const agentEl = appendChatBubble('agent', '...');
+    updateAgentBubble(agentEl, '...');
+
+    const res = await fetch('/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: text }),
+    });
+
+    // Read the SSE stream chunk by chunk, accumulating text events into the agent bubble
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '', fullText = '', replied = false;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const parts = buf.split('\n\n');
+      buf = parts.pop();
+      for (const part of parts) {
+        if (!part.startsWith('data: ')) continue;
+        const data = JSON.parse(part.slice(6));
+        if (data.type === 'text') {
+          replied = true;
+          fullText += data.content;
+          updateAgentBubble(agentEl, fullText);
+        } else if (data.type === 'done') {
+          if (!replied) updateAgentBubble(agentEl, '(no response)');
+        }
+      }
+    }
+    document.getElementById('send').disabled = false;
+    input.focus();
+  }
+
+  // ---- Approval panel ----
+
+  const MCP_HOST = `${location.hostname}:9001`;
+  let currentId = null; // ID of the signing request currently displayed
+
+  // Poll the MCP server for pending signing requests every 1.5s
+  async function fetchPendingRequests() {
+    try {
+      const res = await fetch(`http://${MCP_HOST}/pending`);
+      const items = await res.json();
+      renderApprovalCard(items);
+    } catch (e) {}
+  }
+
+  // Render the first pending request in the approval panel; no-op if already showing it
+  function renderApprovalCard(items) {
+    const body = document.getElementById('approval-body');
+    if (!items.length) {
+      if (!currentId) {
+        body.innerHTML = '<div class="empty-approval">Waiting for<br>signing requests...</div>';
+      }
+      return;
+    }
+    const item = items[0];
+    if (item.id === currentId) return;
+    currentId = item.id;
+    document.getElementById('approval-status').textContent = '';
+    body.innerHTML = `
+      <div class="req-card">
+        <div>
+          <div class="label">Transaction</div>
+          <div class="value">${escapeHtml(item.transaction)}</div>
+        </div>
+        <div>
+          <div class="label">Request ID</div>
+          <div class="value req-id">${escapeHtml(item.id)}</div>
+        </div>
+        <div>
+          <div class="label">Time</div>
+          <div class="value">${escapeHtml(new Date(item.created_at).toLocaleTimeString())}</div>
+        </div>
+        <div class="btn-row">
+          <button class="btn approve" id="btn-approve" onclick="submitApprovalDecision('approve')">Approve</button>
+          <button class="btn reject"  id="btn-reject"  onclick="submitApprovalDecision('reject')">Reject</button>
+        </div>
+      </div>`;
+  }
+
+  // POST approve or reject to the MCP server, then reset the panel
+  async function submitApprovalDecision(action) {
+    if (!currentId) return;
+    document.getElementById('btn-approve').disabled = true;
+    document.getElementById('btn-reject').disabled = true;
+    document.getElementById('approval-status').textContent = 'Sending...';
+    await fetch(`http://${MCP_HOST}/${action}/${currentId}`, { method: 'POST' });
+    document.getElementById('approval-status').textContent =
+      action === 'approve' ? 'Approved.' : 'Rejected.';
+    currentId = null;
+    document.getElementById('approval-body').innerHTML =
+      '<div class="empty-approval">Waiting for<br>signing requests...</div>';
+  }
+
+  // Escape HTML special characters to prevent XSS when inserting user-supplied data
+  function escapeHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  setInterval(fetchPendingRequests, 1500);
+  fetchPendingRequests();
+</script>
+</body>
+</html>

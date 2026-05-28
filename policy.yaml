@@ -1,0 +1,90 @@
+version: 1
+
+# ==============================================================================
+# Static sections — locked at sandbox creation, cannot be hot-reloaded
+# ==============================================================================
+
+filesystem_policy:
+  # Also include the current working directory in the sandbox's accessible paths
+  include_workdir: true
+
+  # Read-only paths: sandbox processes can read but not modify these
+  read_only:
+    - /usr          # System binaries and libraries
+    - /lib          # Core shared libraries
+    - /proc         # Linux virtual filesystem exposing running process info
+    - /dev/urandom  # Random number generator used for cryptographic purposes
+    - /etc          # System configuration files (DNS, hosts, etc.)
+    - /var/log      # System log directory, readable but not writable
+
+  # Read-write paths: sandbox processes can freely read and write these
+  read_write:
+    - /sandbox      # Primary working directory inside the sandbox
+    - /tmp          # Temporary file storage
+    - /dev/null     # Null device — writes are discarded, reads return EOF
+
+# ==============================================================================
+# Landlock — Linux kernel-level sandbox isolation mechanism
+# ==============================================================================
+
+landlock:
+  # best_effort: enable Landlock if the kernel supports it; skip silently if not
+  compatibility: best_effort
+
+# ==============================================================================
+# Process identity — run as a low-privilege user to limit blast radius
+# ==============================================================================
+
+process:
+  run_as_user: sandbox   # Run as the 'sandbox' user, not root
+  run_as_group: sandbox  # Run under the 'sandbox' group
+
+# ==============================================================================
+# Dynamic section — can be hot-reloaded without rebuilding the sandbox:
+#   openshell policy set wallet-agent --policy policy.yaml --wait
+#
+# Default-deny: all outbound traffic is blocked unless explicitly listed below.
+# ==============================================================================
+
+network_policies:
+
+  # ------------------------------------------------------------------------------
+  # External services that Claude Code is allowed to reach
+  # ------------------------------------------------------------------------------
+  claude_code:
+    name: allow-anthropic-api
+    endpoints:
+      # Primary Claude API endpoint — REST, strictly enforced, full access
+      - { host: api.anthropic.com, port: 443, protocol: rest, enforcement: enforce, access: full }
+      # Anthropic feature flag service (controls feature rollouts)
+      - { host: statsig.anthropic.com, port: 443 }
+      # Error reporting service
+      - { host: sentry.io, port: 443 }
+      # Download raw files from GitHub (e.g. update scripts, config files)
+      - { host: raw.githubusercontent.com, port: 443 }
+      # Claude web platform
+      - { host: platform.claude.com, port: 443 }
+    # Only these two binaries are allowed to reach the above endpoints
+    binaries:
+      - { path: /usr/local/bin/claude }
+      - { path: /usr/bin/node }
+
+  # ------------------------------------------------------------------------------
+  # MCP service — only allowed to connect to the MCP server on the host machine
+  # ------------------------------------------------------------------------------
+  mcp_signing_only:
+    name: allow-mcp-signing-only
+    endpoints:
+      - host: host.openshell.internal  # Special hostname that resolves to the host machine from inside the sandbox
+        port: 9001
+        enforcement: enforce
+        # Private IP whitelist: private IPs are blocked by SSRF protection by default,
+        # so they must be explicitly allowed here
+        allowed_ips:
+          - 172.16.0.0/12    # Docker bridge networks (172.16–172.31)
+          - 10.0.0.0/8       # Private class A
+          - 192.168.0.0/16   # Private class C
+    # Only these two binaries are allowed to connect to the MCP server
+    binaries:
+      - { path: /usr/local/bin/claude }
+      - { path: /usr/bin/node }
